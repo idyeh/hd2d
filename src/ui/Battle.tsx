@@ -20,10 +20,11 @@ import { consumePress } from '../game/input'
 import { BattleEffects } from './BattleEffects'
 import './battle.css'
 
-let portraits: { front: string; side: string } | null = null
-function playerPortraits() {
-  if (portraits) return portraits
-  const texture = buildCharacterSheet(LOOKS.player)
+const portraits: Partial<Record<'player' | 'rowan', { front: string; side: string }>> = {}
+function playerPortraits(look: 'player' | 'rowan' = 'player') {
+  const cached = portraits[look]
+  if (cached) return cached
+  const texture = buildCharacterSheet(LOOKS[look])
   const crop = (row: number) => {
     const canvas = document.createElement('canvas')
     canvas.width = FRAME_W
@@ -33,9 +34,10 @@ function playerPortraits() {
       .drawImage(texture.image as HTMLCanvasElement, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H)
     return canvas.toDataURL()
   }
-  portraits = { front: crop(DIR_ROWS.indexOf('down')), side: crop(DIR_ROWS.indexOf('right')) }
+  const result = { front: crop(DIR_ROWS.indexOf('down')), side: crop(DIR_ROWS.indexOf('right')) }
+  portraits[look] = result
   texture.dispose()
-  return portraits
+  return result
 }
 
 function Bar({ value, max, kind, label }: { value: number; max: number; kind: 'hp' | 'enemy'; label: string }) {
@@ -94,7 +96,8 @@ export function BattleScreen() {
   const [effect, setEffect] = useState<BattleEvent | null>(null)
   const panel = useRef<HTMLDivElement>(null)
   const moth = useMemo(() => getMothSprites().urls, [])
-  const hero = useMemo(playerPortraits, [])
+  const hero = useMemo(() => playerPortraits(), [])
+  const rowan = useMemo(() => playerPortraits('rowan'), [])
 
   useEffect(() => {
     if (!b.active) return
@@ -343,12 +346,12 @@ export function BattleScreen() {
           </div>
         </div>
         <div
-          className={`battle-traveller${b.player.defending ? ' guarding' : ''}${b.phase === 'lost' ? ' fallen' : ''}`}
+          className={`battle-traveller${b.player.defending ? ' guarding' : ''}${b.player.hp <= 0 ? ' fallen' : ''}`}
         >
           <div className="traveller-shadow" aria-hidden />
           <div
             key={effect?.id ?? 0}
-            className={`traveller-motion ${effect ? `react-${effect.outcome === 'miss' ? 'miss' : effect.kind}` : ''}`}
+            className={`traveller-motion ${effect && (effect.target === 'player' || (!effect.actor && ['attack', 'counter', 'fire', 'blind', 'defend'].includes(effect.kind))) ? `react-${effect.outcome === 'miss' ? 'miss' : effect.kind}` : ''}`}
           >
             <img src={hero.side} alt="Traveller facing the moth" draggable={false} />
           </div>
@@ -360,6 +363,18 @@ export function BattleScreen() {
             ))}
           <span className="traveller-label">Traveller</span>
         </div>
+        {b.rowan && (
+          <div className={`battle-traveller battle-companion${b.rowan.hp <= 0 ? ' fallen' : ''}`}>
+            <div className="traveller-shadow" aria-hidden />
+            <div key={effect?.id ?? 0} className={`traveller-motion ${effect && (effect.actor === 'rowan' || effect.target === 'rowan') ? `react-${effect.kind}` : ''}`}>
+              <img src={rowan.side} alt="Elder Rowan fighting alongside the traveller" draggable={false} />
+            </div>
+            {b.pops.filter((p) => p.who === 'rowan').map((p) => <FloatingPop key={p.key} pop={p} />)}
+            <span className="traveller-label">Elder Rowan</span>
+            <Bar value={b.rowan.hp} max={b.rowan.max} kind="hp" label="Elder Rowan health" />
+            <span className="companion-health">{b.rowan.hp} / {b.rowan.max} HP</span>
+          </div>
+        )}
         {effect && <BattleEffects key={effect.id} event={effect} />}
         {terminal && (
           <div className={`battle-result ${b.phase}`} role="status">
@@ -378,7 +393,7 @@ export function BattleScreen() {
                 ? 'Guard raised'
                 : b.player.counter
                   ? 'Counter-strike ready'
-                  : 'Lantern Warden’s envoy'}
+                  : b.player.hp <= 0 ? 'Down — Rowan fights on' : b.rowan ? `Rowan: ${b.rowan.hp > 0 ? `${b.rowan.heals} heals left · auto support` : 'Down'}` : 'Lantern Warden’s envoy'}
             </div>
             <Bar value={b.player.hp} max={b.player.max} kind="hp" label="Traveller health" />
             <div className="hp-num">

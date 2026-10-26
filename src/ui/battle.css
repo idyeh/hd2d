@@ -1984,3 +1984,15 @@
     transform: none;
   }
 }
+
+/* The recruited ally shares the arena, with an independent HP meter. */
+.battle { --ally-x: calc(var(--hero-x) - 12%); --ally-y: calc(var(--hero-y) - 5%); }
+.battle-companion { left: var(--ally-x); top: var(--ally-y); width: clamp(48px, 5.2vw, 72px); }
+.battle-companion .traveller-label { white-space: nowrap; font-size: 11px; bottom: -22px; }
+.battle-companion > .bar { position: absolute; top: calc(100% + 30px); width: 110%; left: -5%; height: 5px; }
+.companion-health { position: absolute; top: calc(100% + 39px); left: 50%; transform: translateX(-50%); font-size: 10px; white-space: nowrap; color: #eee0bc; }
+.battle-fx.target-rowan .fx-at-player { left: var(--ally-x); top: calc(var(--ally-y) - 12%); }
+@media (max-width: 600px) {
+  .battle { --ally-x: calc(var(--hero-x) + 18%); --ally-y: calc(var(--hero-y) - 15%); }
+  .battle-companion { width: 42px; }
+}

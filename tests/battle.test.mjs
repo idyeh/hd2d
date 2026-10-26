@@ -55,8 +55,10 @@ function harness() {
     return module.exports
   }
   const inventory = load('../src/game/inventory.ts')
+  const party = load('../src/game/party.ts')
   const api = load('../src/game/battle.ts', {
     './inventory': inventory,
+    './party': party,
     './audio': { sound: new Proxy({}, { get: (_, name) => () => sounds.push(name) }) },
   })
   const battle = api.useBattle
@@ -71,7 +73,7 @@ function harness() {
     next()
     return enemyBeat
   }
-  return { ...api, inventory: inventory.useInventory, battle, sounds, tick, next, start, round, jobs }
+  return { ...api, party: party.useParty, load, storage, inventory: inventory.useInventory, battle, sounds, tick, next, start, round, jobs }
 }
 
 test('inactive and entering encounters reject actions, retry and leave', () => {
@@ -295,4 +297,146 @@ test('retreat restores items after its exit, before a callback starts a new enco
   assert.equal(h.battle.getState().transition, 'ready')
   assert.equal(h.battle.getState().player.hp, 50)
   assert.equal(h.inventory.getState().count('oil'), 1)
+})
+
+
+test('recruitment persists, reloads and resets', () => {
+  const h = harness()
+  assert.equal(h.party.getState().rowan, false)
+  h.party.getState().recruitRowan()
+  assert.equal(h.storage.get('hd2d-party-v1'), 'rowan')
+  assert.equal(h.load('../src/game/party.ts').useParty.getState().rowan, true)
+  h.start()
+  assert.equal(h.battle.getState().rowan.hp, 36)
+  h.party.getState().reset()
+  assert.equal(h.load('../src/game/party.ts').useParty.getState().rowan, false)
+})
+
+test('Rowan acts after the player and breaks a charged burst', () => {
+  const h = harness()
+  h.party.getState().recruitRowan()
+  h.start()
+  h.battle.setState((s) => ({ enemy: { ...s.enemy, shield: 2, step: 2 }, next: 'burst' }))
+  h.battle.getState().act({ type: 'attack' })
+  h.next()
+  assert.equal(h.battle.getState().event.actor, 'rowan')
+  assert.equal(h.battle.getState().event.breaks, true)
+  assert.equal(h.battle.getState().enemy.hp, 74)
+  assert.equal(h.battle.getState().next, 'buffet')
+  h.battle.getState().act({ type: 'attack' })
+  assert.equal(h.battle.getState().enemy.hp, 74)
+  h.next()
+  assert.equal(h.battle.getState().event.kind, 'break')
+  assert.equal(h.battle.getState().player.hp, 50)
+  h.next()
+  assert.equal(h.battle.getState().phase, 'command')
+  assert.equal(h.battle.getState().turn, 2)
+})
+
+test('Rowan heals with limited charges, without consuming inventory', () => {
+  const h = harness()
+  h.party.getState().recruitRowan()
+  h.start()
+  h.battle.setState((s) => ({ player: { ...s.player, hp: 15 } }))
+  h.battle.getState().act({ type: 'defend' })
+  h.next()
+  assert.equal(h.battle.getState().event.actor, 'rowan')
+  assert.equal(h.battle.getState().event.kind, 'heal')
+  assert.equal(h.battle.getState().player.hp, 33)
+  assert.equal(h.battle.getState().rowan.heals, 2)
+  assert.equal(h.inventory.getState().count('herb'), 3)
+  h.next()
+  h.next()
+  h.battle.setState((s) => ({ rowan: { ...s.rowan, heals: 0 }, player: { ...s.player, hp: 15 } }))
+  h.battle.getState().act({ type: 'defend' })
+  h.next()
+  assert.equal(h.battle.getState().event.kind, 'attack')
+  assert.equal(h.battle.getState().player.hp, 15)
+})
+
+test('enemy targets Rowan on alternate rounds; fallen Rowan stops acting', () => {
+  const h = harness()
+  h.party.getState().recruitRowan()
+  h.start()
+  h.battle.setState((s) => ({ turn: 2, rowan: { ...s.rowan, hp: 1 } }))
+  h.battle.getState().act({ type: 'defend' })
+  h.next()
+  h.next()
+  assert.equal(h.battle.getState().event.target, 'rowan')
+  assert.equal(h.battle.getState().rowan.hp, 0)
+  assert.equal(h.battle.getState().player.hp, 50)
+  h.next()
+  assert.equal(h.battle.getState().phase, 'command')
+  h.battle.getState().act({ type: 'attack' })
+  h.next()
+  assert.equal(h.battle.getState().event.kind, 'gather')
+})
+
+test('Rowan continues and can win after the hero falls', () => {
+  const h = harness()
+  h.party.getState().recruitRowan()
+  h.start()
+  h.battle.setState((s) => ({ player: { ...s.player, hp: 1 }, rowan: { ...s.rowan, heals: 0 }, enemy: { ...s.enemy, hp: 19 } }))
+  h.battle.getState().act({ type: 'attack' })
+  h.next()
+  h.next()
+  assert.equal(h.battle.getState().player.hp, 0)
+  h.next()
+  assert.equal(h.battle.getState().event.actor, 'rowan')
+  h.next()
+  assert.equal(h.battle.getState().phase, 'won')
+  assert.equal(h.battle.getState().enemy.hp, 0)
+})
+
+test('party defeat and retry restore both allies and healing charges', () => {
+  const h = harness()
+  h.party.getState().recruitRowan()
+  h.start()
+  h.battle.setState((s) => ({ player: { ...s.player, hp: 1 }, rowan: { ...s.rowan, hp: 0, heals: 0 } }))
+  h.round({ type: 'defend' })
+  assert.equal(h.battle.getState().phase, 'lost')
+  h.battle.getState().retry()
+  h.tick(h.BATTLE_ENTER_MS)
+  assert.equal(h.battle.getState().player.hp, 50)
+  assert.equal(h.battle.getState().rowan.hp, 36)
+  assert.equal(h.battle.getState().rowan.heals, 3)
+  assert.equal(h.party.getState().rowan, true)
+})
+
+test('optional recruitment preserves letter delivery and is not offered twice', () => {
+  const h = harness()
+  const story = h.load('../src/game/story.ts', { './inventory': { useInventory: h.inventory } })
+  let banner = ''
+  const script = h.load('../src/game/script.ts', {
+    './state': { useGame: { setState() {}, getState: () => ({ showBanner: (name) => { banner = name } }) } },
+    './story': story,
+    './inventory': { useInventory: h.inventory, useToasts: { getState: () => ({ push() {} }) } },
+    './battle': { useBattle: h.battle },
+    './party': { useParty: h.party },
+    './audio': { sound: {} },
+  })
+  story.useStory.getState().begin()
+  const first = script.rowanTalk({ night: false, visits: 0 })
+  assert.ok(first.choices.some((c) => c.id === 'join'))
+  first.onDone('later')
+  assert.equal(story.useStory.getState().stage, 'warned')
+  assert.equal(h.inventory.getState().count('letter'), 0)
+  assert.equal(h.party.getState().rowan, false)
+  script.rowanTalk({ night: true, visits: 1 }).onDone('join')
+  assert.equal(h.party.getState().rowan, true)
+  assert.equal(banner, 'Elder Rowan joined')
+  assert.equal(script.rowanTalk({ night: true, visits: 2 }).choices, undefined)
+})
+
+test('a surviving Rowan eventually loses when knocked out without waiting for input', () => {
+  const h = harness()
+  h.party.getState().recruitRowan()
+  h.start()
+  h.battle.setState((s) => ({ player: { ...s.player, hp: 1 }, rowan: { ...s.rowan, hp: 1, heals: 0 } }))
+  h.battle.getState().act({ type: 'attack' })
+  for (let i = 0; i < 20 && h.battle.getState().phase !== 'lost'; i++) h.next()
+  assert.equal(h.battle.getState().phase, 'lost')
+  assert.equal(h.battle.getState().rowan.hp, 0)
+  assert.equal(h.battle.getState().player.hp, 0)
+  assert.equal(h.jobs.size, 0)
 })

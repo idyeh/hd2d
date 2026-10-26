@@ -8,7 +8,7 @@ export function BattleEffects({ event }: { event: BattleEvent }) {
   const enemyAttack = event.kind === 'buffet' || heavy
   return (
     <div
-      className={`battle-fx fx-${event.kind}${event.guarded ? ' guarded' : ''}${event.outcome === 'miss' ? ' missed' : ''}`}
+      className={`battle-fx fx-${event.kind}${event.guarded ? ' guarded' : ''}${event.outcome === 'miss' ? ' missed' : ''}${event.target === 'rowan' ? ' target-rowan' : ''}`}
       aria-hidden
     >
       {attack && (

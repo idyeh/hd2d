@@ -219,6 +219,51 @@ export function Player() {
   return <SpriteCharacter look="player" state={state} />
 }
 
+/** Replay the player's recent path, so the companion follows around corners and through doors. */
+export function RowanCompanion() {
+  const state = useMemo<CharacterState>(() => ({ ...runtime.player, running: false, anim: 0 }), [])
+  const trail = useRef<{ x: number; z: number }[]>([])
+  useEffect(() => {
+    const it: Interactable = { id: 'rowan', kind: 'talk', name: 'Elder Rowan', pos: state,
+      reach: 1.3, iconHeight: 1.95, talk: NPC_TALK.rowan, get area() { return useGame.getState().area } }
+    registerInteractable(it)
+    return () => unregisterInteractable(it)
+  }, [state])
+  useFrame(() => {
+    if (!runtime.dt || useBattle.getState().active) return
+    const player = runtime.player
+    const points = trail.current
+    const last = points[points.length - 1]
+    if (!last || Math.hypot(player.x - last.x, player.z - last.z) > 4) {
+      points.length = 0
+      points.push({ x: player.x, z: player.z })
+      Object.assign(state, { x: player.x, z: player.z, moving: false })
+      return
+    }
+    if (Math.hypot(player.x - last.x, player.z - last.z) < 0.08) {
+      state.moving = false
+      return
+    }
+    points.push({ x: player.x, z: player.z })
+    let distance = 0
+    let index = points.length - 1
+    while (index > 0 && distance < 1.25) {
+      distance += Math.hypot(points[index].x - points[index - 1].x, points[index].z - points[index - 1].z)
+      index--
+    }
+    const target = points[index]
+    const dx = target.x - state.x
+    const dz = target.z - state.z
+    state.moving = Math.hypot(dx, dz) > 0.01
+    state.running = Math.hypot(dx, dz) > runtime.dt * 4
+    if (state.moving) state.facing = dirTowards(dx, dz)
+    state.x = target.x
+    state.z = target.z
+    if (index > 0) points.splice(0, index)
+  }, -1.5)
+  return <SpriteCharacter look="rowan" state={state} />
+}
+
 export function Npc({ def }: { def: NpcDef }) {
   const state = useMemo<CharacterState>(
     () => ({ x: def.x, z: def.z, facing: def.facing, moving: false, running: false, anim: Math.random() * 2 }),

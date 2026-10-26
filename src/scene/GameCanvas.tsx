@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
 import { useQuality, useSettings } from '../game/settings'
 import { runtime, useGame } from '../game/state'
+import { useParty } from '../game/party'
 import { useDev } from '../game/dev'
 import { BRANN_AT_HOME, BRANN_AT_MILL, NPCS } from '../game/world/layout'
 import { brannLocation, useStory } from '../game/story'
@@ -17,7 +18,7 @@ import { Bridge, Crates, Fence, Well } from './Props'
 import { LightPool, Lamps } from './Lamps'
 import { AreaGroup, Interior } from './Interior'
 import { Foliage, Trees } from './Vegetation'
-import { InteractionMarker, Npc, Player } from './Characters'
+import { InteractionMarker, Npc, Player, RowanCompanion } from './Characters'
 import { Atmosphere } from './Atmosphere'
 import { Effects } from './Effects'
 import { FrameEnd, PerformanceController } from './Performance'
@@ -28,6 +29,7 @@ import { RiversideMill } from './RiversideMill'
 import { AudioDirector } from './AudioDirector'
 
 export function GameCanvas() {
+  const hasRowan = useParty((s) => s.rowan)
   const quality = useQuality()
   const adaptive = useSettings((s) => s.adaptive)
   const sceneId = useGame((s) => s.sceneId)
@@ -68,7 +70,7 @@ export function GameCanvas() {
           <Lamps />
           <Trees />
           <Foliage density={quality.foliage} />
-          {NPCS.map((n) => (
+          {NPCS.filter((n) => !hasRowan || n.id !== 'rowan').map((n) => (
             <Npc key={n.id} def={n} />
           ))}
           {brann && <Npc key="brann" def={brann} />}
@@ -80,6 +82,7 @@ export function GameCanvas() {
           </AreaGroup>
         )}
         <Player />
+        {hasRowan && <RowanCompanion />}
         <InteractionMarker />
         <Effects quality={quality} />
         <DevTools />

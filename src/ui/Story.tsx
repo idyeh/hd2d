@@ -6,11 +6,13 @@ import { runtime, useGame } from '../game/state'
 import { consumePress } from '../game/input'
 import { sound } from '../game/audio'
 import { getBody, placeBody } from '../game/world/collision'
+import { useParty } from '../game/party'
 import { PLAYER_SPAWN } from '../game/world/layout'
 
 /** Start over: story, bag and searched spots, time of day, and the player back at the road. */
 export function newGame() {
   const g = useGame.getState()
+  useParty.getState().reset()
   useStory.getState().reset()
   useInventory.getState().reset()
   useGame.setState({ visits: {}, night: false, dialogue: null, inventoryOpen: false, menuOpen: false })

@@ -1,4 +1,4 @@
-// One small tactical encounter: the traveller vs. the gloam moth.
+// One tactical encounter: the traveller and optional Elder Rowan vs. the gloam moth.
 //
 // Readable rules, Octopath-style:
 //  • The moth's next move is always shown (its "intent"). It loops:
@@ -13,6 +13,7 @@
 //  • Losing offers Retry (from the start, items restored) or stepping back to choose again.
 import { create } from 'zustand'
 import { ITEMS, useInventory, type ItemId, type Saved } from './inventory'
+import { useParty } from './party'
 import { sound } from './audio'
 
 export type EnemyMove = 'buffet' | 'gather' | 'burst' | 'drink'
@@ -53,7 +54,8 @@ export type BattleEventKind =
 export interface BattleEvent {
   id: number
   kind: BattleEventKind
-  target: 'enemy' | 'player'
+  actor?: 'player' | 'rowan' | 'enemy'
+  target: 'enemy' | 'player' | 'rowan'
   guarded?: boolean
   outcome?: 'hit' | 'miss' | 'guarded'
   breaks?: boolean
@@ -70,7 +72,7 @@ const BEAT_REST_MS = 140
 
 export interface Pop {
   key: number
-  who: 'enemy' | 'player'
+  who: 'enemy' | 'player' | 'rowan'
   text: string
   kind: 'dmg' | 'heal' | 'miss' | 'break' | 'guard'
 }
@@ -88,6 +90,7 @@ export interface BattleState {
   transition: 'entering' | 'ready' | 'leaving'
   event: BattleEvent | null
   phase: 'command' | 'busy' | 'won' | 'lost'
+  rowan: { hp: number; max: number; heals: number } | null
   player: { hp: number; max: number; defending: boolean; counter: boolean }
   enemy: { hp: number; max: number; shield: number; maxShield: number; breakTurns: number; blinded: boolean; step: number }
   next: EnemyMove
@@ -124,6 +127,7 @@ function moveAt(step: number, hp: number, max: number): EnemyMove {
 function fresh() {
   return {
     phase: 'command' as const,
+    rowan: useParty.getState().rowan ? { hp: 36, max: 36, heals: 3 } : null,
     player: { hp: PLAYER_HP, max: PLAYER_HP, defending: false, counter: false },
     enemy: { hp: ENEMY_HP, max: ENEMY_HP, shield: SHIELD, maxShield: SHIELD, breakTurns: 0, blinded: false, step: 0 },
     next: 'buffet' as EnemyMove,
@@ -172,6 +176,7 @@ export const useBattle = create<BattleState>((set, get) => {
     if (!s.active || s.transition !== 'ready' || s.phase !== 'busy') return
     const e = { ...s.enemy }
     const p = { ...s.player }
+    const rowan = s.rowan ? { ...s.rowan } : null
     const pops: Pop[] = []
     let message: string
     let beat: BattleEvent
@@ -198,21 +203,25 @@ export const useBattle = create<BattleState>((set, get) => {
         beat = event('drink', 'enemy')
         sound.chime(false)
       } else {
+        const target = rowan && rowan.hp > 0 && (p.hp <= 0 || s.turn % 2 === 0) ? 'rowan' : 'player'
+        const victim = target === 'rowan' ? rowan! : p
+        const guarded = target === 'player' && p.defending
+        const name = target === 'rowan' ? 'Rowan' : 'You'
         const base = move === 'burst' ? rand(22, 26) : rand(8, 10)
         if (e.blinded) {
           e.blinded = false
           message = `${MOVES[move].name}! Lost in the flour cloud, it misses completely.`
-          pops.push(pop('player', 'Miss', 'miss'))
-          beat = event(move, 'player', { outcome: 'miss' })
+          pops.push(pop(target, 'Miss', 'miss'))
+          beat = event(move, target, { outcome: 'miss', actor: 'enemy' })
           sound.guard()
         } else {
-          const dmg = p.defending ? Math.max(1, Math.round(base * 0.4)) : base
-          p.hp = Math.max(0, p.hp - dmg)
-          message = `${MOVES[move].name}! ${p.defending ? `You brace and take only ${dmg}` : `You take ${dmg}`} damage.`
-          pops.push(pop('player', `−${dmg}`, 'dmg'))
-          hitPlayer++
-          beat = event(move, 'player', { guarded: p.defending, outcome: p.defending ? 'guarded' : 'hit' })
-          if (p.defending) sound.guard()
+          const dmg = guarded ? Math.max(1, Math.round(base * 0.4)) : base
+          victim.hp = Math.max(0, victim.hp - dmg)
+          message = `${MOVES[move].name}! ${guarded ? `You brace and take only ${dmg}` : `${name} take${target === 'rowan' ? 's' : ''} ${dmg}`} damage.`
+          pops.push(pop(target, `−${dmg}`, 'dmg'))
+          if (target === 'player') hitPlayer++
+          beat = event(move, target, { actor: 'enemy', guarded, outcome: guarded ? 'guarded' : 'hit' })
+          if (guarded) sound.guard()
           else sound.hit(move === 'burst')
         }
       }
@@ -220,15 +229,75 @@ export const useBattle = create<BattleState>((set, get) => {
     }
     p.defending = false
     const next = e.step === s.enemy.step ? s.next : moveAt(e.step, e.hp, e.max)
-    set({ enemy: e, player: p, message, next, event: beat, pops: withPops(s.pops, pops), hitPlayer })
+    set({ enemy: e, player: p, rowan, message, next, event: beat, pops: withPops(s.pops, pops), hitPlayer })
 
     later(BATTLE_EFFECT_MS[beat.kind] + BEAT_REST_MS, () => {
-      if (get().player.hp <= 0) {
+      if (get().player.hp <= 0 && (!get().rowan || get().rowan!.hp <= 0)) {
         set({ phase: 'lost', message: 'The gloam overwhelms you…', event: event('recoil', 'player') })
         sound.defeat()
         return
       }
-      set((st) => ({ phase: 'command', turn: st.turn + 1, event: null }))
+      set((st) => ({ phase: st.player.hp > 0 ? 'command' : 'busy', turn: st.turn + 1, event: null }))
+      if (get().player.hp <= 0) companionPhase()
+    })
+  }
+
+
+  const finishAction = () => {
+    if (get().enemy.hp <= 0) {
+      set({ phase: 'won', message: 'The gloam moth reels away over the river and vanishes into the Whisperwood!', event: event('recoil', 'enemy') })
+      sound.victory()
+      return true
+    }
+    return false
+  }
+
+  /** One automatic ally action per party round, before the enemy responds. */
+  const companionPhase = () => {
+    if (finishAction()) return
+    const s = get()
+    if (!s.rowan || s.rowan.hp <= 0) { enemyPhase(); return }
+    const rowan = { ...s.rowan }
+    const player = { ...s.player }
+    const enemy = { ...s.enemy }
+    let beat: BattleEvent
+    let message: string
+    const pops: Pop[] = []
+    let next = s.next
+    if (player.hp > 0 && player.hp <= 20 && rowan.heals > 0) {
+      const heal = Math.min(18, player.max - player.hp)
+      player.hp += heal
+      rowan.heals--
+      pops.push(pop('player', `+${heal}`, 'heal'))
+      message = `Rowan uses Mending Light — you recover ${heal} HP. (${rowan.heals} uses left)`
+      beat = event('heal', 'player', { actor: 'rowan' })
+      sound.chime()
+    } else {
+      const damage = rand(6, 9) * (enemy.breakTurns > 0 ? 2 : 1)
+      enemy.hp = Math.max(0, enemy.hp - damage)
+      let breaks = false
+      if (enemy.breakTurns === 0 && enemy.shield > 0) {
+        enemy.shield--
+        if (enemy.shield === 0) {
+          enemy.breakTurns = 2
+          breaks = true
+          if (next === 'burst') {
+            enemy.step++
+            next = moveAt(enemy.step, enemy.hp, enemy.max)
+          }
+          pops.push(pop('enemy', 'BREAK!', 'break'))
+          sound.breakShield()
+        }
+      }
+      pops.push(pop('enemy', `−${damage}`, 'dmg'))
+      message = `Rowan strikes with his staff for ${damage} damage${breaks ? ' — BREAK!' : '.'}`
+      beat = event('attack', 'enemy', { actor: 'rowan', breaks })
+      sound.hit(false)
+    }
+    set({ rowan, player, enemy, next, message, event: beat, pops: withPops(s.pops, pops),
+      hitEnemy: s.hitEnemy + (beat.kind === 'attack' ? 1 : 0) })
+    later(BATTLE_EFFECT_MS[beat.kind] + BEAT_REST_MS, () => {
+      if (!finishAction()) enemyPhase()
     })
   }
 
@@ -246,7 +315,7 @@ export const useBattle = create<BattleState>((set, get) => {
     },
     act: (a) => {
       const s = get()
-      if (!s.active || s.transition !== 'ready' || s.phase !== 'command') return
+      if (!s.active || s.transition !== 'ready' || s.phase !== 'command' || s.player.hp <= 0) return
       const e = { ...s.enemy }
       const p = { ...s.player }
       const pops: Pop[] = []
@@ -323,12 +392,7 @@ export const useBattle = create<BattleState>((set, get) => {
       set({ enemy: e, player: p, message, phase: 'busy', next, event: beat, pops: withPops(s.pops, pops), hitEnemy })
 
       later(BATTLE_EFFECT_MS[beat.kind] + BEAT_REST_MS, () => {
-        if (get().enemy.hp <= 0) {
-          set({ phase: 'won', message: 'The gloam moth reels away over the river and vanishes into the Whisperwood!', event: event('recoil', 'enemy') })
-          sound.victory()
-          return
-        }
-        enemyPhase()
+        companionPhase()
       })
     },
     retry: () => {

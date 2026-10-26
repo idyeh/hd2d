@@ -269,3 +269,17 @@ src/
 - Hand-drawn sprite art: the procedural sprites are stand-ins; drop in sprite sheets with the same
   16×24 frame layout (`FRAMES` × `DIR_ROWS` in `characterSprites.ts`) to replace them.
 - A WebGPU renderer path.
+
+## Recruit Elder Rowan
+
+Talk to Elder Rowan and choose **Join me, Rowan.** at the end of his conversation.
+Recruitment is optional and saved in localStorage; choosing to wait lets you invite him later.
+He follows your path in the village, mill and cottage, and can still be spoken to for the quest.
+Starting a new game clears the party.
+
+In battle, choose the Traveller's command as usual. Rowan then acts automatically before the
+moth: **Staff Strike** deals 6–9 damage and removes one shield, or **Mending Light** heals the
+Traveller for 18 HP when at 20 HP or below (three uses per encounter). Rowan has 36 HP and can
+be targeted and knocked out. The moth alternates targets by round while both allies are up.
+If the Traveller falls, Rowan continues automatically; defeat requires the entire party to fall.
+Retry restores both allies, Rowan's healing charges and the pre-fight inventory.

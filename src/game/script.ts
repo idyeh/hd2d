@@ -6,6 +6,7 @@ import { useGame } from './state'
 import { atLeast, hasItem, useStory } from './story'
 import { useInventory, useToasts } from './inventory'
 import { useBattle } from './battle'
+import { useParty } from './party'
 import { sound } from './audio'
 
 export interface TalkContext {
@@ -24,7 +25,24 @@ function giveItem(id: 'wingdust' | 'scale', label = 'Obtained') {
 
 // ---------------------------------------------------------------- Elder Rowan
 
-export function rowanTalk({ night }: TalkContext): Conversation {
+export function rowanTalk(ctx: TalkContext): Conversation {
+  const conversation = rowanStoryTalk(ctx)
+  if (useParty.getState().rowan) return conversation
+  return {
+    ...conversation,
+    lines: [...conversation.lines, say('Elder Rowan', 'You need not face the dark alone. Shall I lend you my staff and healing arts?')],
+    choices: [{ id: 'join', label: 'Join me, Rowan.' }, { id: 'later', label: 'I will come back for you.' }],
+    onDone: (choice) => {
+      conversation.onDone?.(choice)
+      if (choice === 'join') {
+        useParty.getState().recruitRowan()
+        useGame.getState().showBanner('Elder Rowan joined', 'Rowan attacks with his staff and tends your wounds in battle')
+      }
+    },
+  }
+}
+
+function rowanStoryTalk({ night }: TalkContext): Conversation {
   const { stage, ending } = useStory.getState()
   const R = (t: string) => say('Elder Rowan', t)
   switch (stage) {
